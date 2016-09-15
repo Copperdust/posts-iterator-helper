@@ -118,7 +118,7 @@ Class Posts_Iterator_Helper {
    * updated posts' ID
    */
   // TODO Use WordPress's POST instead of a foreach on the results maybe?
-  public static function callback( $post ) {
+  public static function default_callback( $post ) {
     // Trigger post update (same data)
     wp_update_post( $post );
     // Print updated ID
@@ -144,9 +144,11 @@ Class Posts_Iterator_Helper {
 
   private function parse_args() {
     if ( !$this->args ) {
-      $this->callback = array( __CLASS__, 'callback' );
+      $this->callback = array( __CLASS__, 'default_callback' );
     } else {
-      eval( "\$this->callback = function( $post ) {".$this->args."}" );
+      // TODO Use this here instead of the ugly eval http://wp-cli.org/docs/internal-api/wp-cli-utils-launch-editor-for-input/
+      $func = "\$this->callback = function( \$post ) { ".PHP_EOL.$this->args[0].PHP_EOL." };";
+      eval ($func);
     }
   }
 

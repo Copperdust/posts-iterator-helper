@@ -44,6 +44,7 @@ Class Posts_Iterator_Helper {
    * Singleton END (Normally this'd be a trait but we're using PHP5.3 in UbuntuSrv)
    */
 
+  // Default arguments for WP_Query
   public static $default_args = array(
     "paged"          => 1,
     "posts_per_page" => 100,
@@ -51,34 +52,19 @@ Class Posts_Iterator_Helper {
     "post_status"    => "draft",
   );
 
-  public static $logfile = "";
+  // Unnamed arguments array. Should be only one, the function to iterate posts with
+  protected $args = array();
+
+  // Named arguments. Currently only WP_Query args, prefixed with --query_
+  protected $args_assoc = array();
+
+  // Callback to default callback function. Overridable
+  protected $callback = array( __CLASS__, 'default_callback' );
 
   /**
    * Init class
    */
   protected function init() {
-    // If we're trying to use WP_CLI and it doesn't exist, bail silently to
-    // avoid problems to a site's FE
-    if ( PIH_METHOD == "WP_CLI" && !class_exists( 'WP_CLI' ) ) return;
-
-    // Define default variables
-
-    // Log file
-    self::$logfile = trailingslashit( __DIR__.'/logs' ) . "posts-iterator-helper.log";
-
-    // Default post type
-    $this->post_type = 'post';
-
-    // Default SQL select
-    global $wpdb;
-    $this->sql = "
-      SELECT
-        ID
-      FROM $wpdb->posts
-      WHERE 1 = 1
-    ";
-    // FOR DEV ONLY
-    $this->sql .= " LIMIT 1";
   }
 
   /**
@@ -128,10 +114,11 @@ Class Posts_Iterator_Helper {
   /**
    * Loop through each post and execute callback based on it. Then die.
    */
-  public function do_callback() {
+  private function do_callback() {
+    // Make sure we actually have posts
     if ( !is_array( $this->posts ) ) {
       self::log( "Posts: ", $this->posts );
-      WP_CLI::error( "No posts were initialized" );
+      WP_CLI::error( "No posts were initialized" ); // This die()'s execution
     }
     // Loop through the array of posts
     foreach ( $this->posts as $post ) {
@@ -142,29 +129,43 @@ Class Posts_Iterator_Helper {
     exit;
   }
 
+  /**
+   * If a function body was passed, then assign it to $this->callback
+   *
+   * I know it's fugly, I'm sorry
+   */
   private function parse_args() {
-    if ( !$this->args ) {
-      $this->callback = array( __CLASS__, 'default_callback' );
-    } else {
+    if ( $this->args ) {
       // TODO Use this here instead of the ugly eval http://wp-cli.org/docs/internal-api/wp-cli-utils-launch-editor-for-input/
       $func = "\$this->callback = function( \$post ) { ".PHP_EOL.$this->args[0].PHP_EOL." };";
       eval ($func);
     }
   }
 
-  private function parse_query() {
-    $keys = array_keys( $this->assoc_args );
+  /**
+   * Get all --query_ arguments and put them on $args
+   *
+   * We are eval'ing the values passed in order to allow arrays and objects to be passed
+   */
+  private function parse_query_args() {
     $args = array();
-    foreach ($keys as $k) {
+    foreach ($this->assoc_args as $k => $v) {
+      // For now we only know what to do with --query_ arguments
       if ( strpos($k, 'query_') !== false ) {
-        eval( "\$val = ".$this->assoc_args[ $k ].";" );
+        eval( "\$val = ".$v.";" );
         $args[ str_replace( 'query_', '', $k ) ] = $val;
       }
     }
-    $args = wp_parse_args( $args, self::$default_args );
+    $this->args = wp_parse_args( $args, self::$default_args );
+  }
 
-    $this->query = new WP_Query( $args );
-    $this->posts = $this->query->posts;
+  /**
+   * Actually do the query
+   */
+  private function do_query() {
+    // Do the query and set $this->posts
+    $query = new WP_Query( $this->args );
+    $this->posts = $query->posts;
   }
 
   /**
@@ -174,10 +175,12 @@ Class Posts_Iterator_Helper {
    */
   public function wp_cli_entry( $args = false, $assoc_args = false ) {
     $this->args = $args;
-    $this->assoc_args = $assoc_args;
     $this->parse_args();
     
-    $this->parse_query();
+    $this->assoc_args = $assoc_args;
+    $this->parse_query_args();
+
+    $this->do_query();
 
     $this->do_callback();
   }
@@ -185,7 +188,6 @@ Class Posts_Iterator_Helper {
 }
 
 if ( PIH_METHOD == "WP_CLI" && class_exists( 'WP_CLI' ) ) {
-  // Init?
   $helper = Posts_Iterator_Helper::getInstance();
-  WP_CLI::add_command( 'zg iterate-posts', array( $helper, 'wp_cli_entry' ) );
+  WP_CLI::add_command( 'iterate-posts', array( $helper, 'wp_cli_entry' ) );
 }

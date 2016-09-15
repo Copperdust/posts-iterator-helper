@@ -58,9 +58,6 @@ Class Posts_Iterator_Helper {
   // Named arguments. Currently only WP_Query args, prefixed with --query_
   protected $args_assoc = array();
 
-  // Callback to default callback function. Overridable
-  protected $callback = array( __CLASS__, 'default_callback' );
-
   /**
    * Init class
    */
@@ -112,34 +109,15 @@ Class Posts_Iterator_Helper {
   }
 
   /**
-   * Loop through each post and execute callback based on it. Then die.
-   */
-  private function do_callback() {
-    // Make sure we actually have posts
-    if ( !is_array( $this->posts ) ) {
-      self::log( "Posts: ", $this->posts );
-      WP_CLI::error( "No posts were initialized" ); // This die()'s execution
-    }
-    // Loop through the array of posts
-    foreach ( $this->posts as $post ) {
-      // Do the callback based on this post's ID
-      call_user_func_array( $this->callback, array( $post ) );
-    }
-    // Die
-    exit;
-  }
-
-  /**
    * If a function body was passed, then assign it to $this->callback
    *
    * I know it's fugly, I'm sorry
    */
-  private function parse_args() {
-    if ( $this->args ) {
-      // TODO Use this here instead of the ugly eval http://wp-cli.org/docs/internal-api/wp-cli-utils-launch-editor-for-input/
-      $func = "\$this->callback = function( \$post ) { ".PHP_EOL.$this->args[0].PHP_EOL." };";
-      eval ($func);
-    }
+  private function create_callback( $callback ) {
+    // TODO Use this here instead of the ugly eval http://wp-cli.org/docs/internal-api/wp-cli-utils-launch-editor-for-input/
+    $func = "\$callback = function( \$post ) { ".PHP_EOL.$callback.PHP_EOL." };";
+    eval ($func);
+    return $callback;
   }
 
   /**
@@ -147,25 +125,16 @@ Class Posts_Iterator_Helper {
    *
    * We are eval'ing the values passed in order to allow arrays and objects to be passed
    */
-  private function parse_query_args() {
+  private function parse_query_args( $assoc_args ) {
     $args = array();
-    foreach ($this->assoc_args as $k => $v) {
+    foreach ($assoc_args as $k => $v) {
       // For now we only know what to do with --query_ arguments
       if ( strpos($k, 'query_') !== false ) {
         eval( "\$val = ".$v.";" );
         $args[ str_replace( 'query_', '', $k ) ] = $val;
       }
     }
-    $this->args = wp_parse_args( $args, self::$default_args );
-  }
-
-  /**
-   * Actually do the query
-   */
-  private function do_query() {
-    // Do the query and set $this->posts
-    $query = new WP_Query( $this->args );
-    $this->posts = $query->posts;
+    return wp_parse_args( $args, self::$default_args );
   }
 
   /**
@@ -173,16 +142,24 @@ Class Posts_Iterator_Helper {
    *
    * wp zg iterate posts [args] [--assoc_args=assoc_args]
    */
-  public function wp_cli_entry( $args = false, $assoc_args = false ) {
-    $this->args = $args;
-    $this->parse_args();
-    
-    $this->assoc_args = $assoc_args;
-    $this->parse_query_args();
-
-    $this->do_query();
-
-    $this->do_callback();
+  public function wp_cli_entry( $args = array(), $assoc_args = array() ) {
+    // Create default callback if passed, otherwise use default
+    $cb = array( __CLASS__, 'default_callback' );
+    if ( isset( $args[0] ) ) {
+      $cb = $this->create_callback( $args[0] );
+    }
+    // Parse query args if any were passed
+    $args = $this->parse_query_args( $assoc_args );
+    // Do query
+    $query = new WP_Query( $args );
+    // Iterate through callback
+    if ( count( $query->posts ) ) {
+      array_map( $cb, $query->posts );
+    } else {
+      // Print query posts for debugging purposes
+      self::log( "Posts: ", $query->posts );
+      WP_CLI::error( "No posts found." );
+    }
   }
 
 }

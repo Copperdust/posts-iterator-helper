@@ -14,6 +14,10 @@
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
  */
 
+// Example Commands:
+// 
+// wp zg iterate-posts --query_posts_per_page=10 --query_paged=2 --query_post_status="array('ready-to-post')"
+
 // If this file is called directly, abort.
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -40,6 +44,13 @@ Class Posts_Iterator_Helper {
    * Singleton END (Normally this'd be a trait but we're using PHP5.3 in UbuntuSrv)
    */
 
+  public static $default_args = array(
+    "paged"          => 1,
+    "posts_per_page" => 100,
+    "post_type"      => "post",
+    "post_status"    => "draft",
+  );
+
   public static $logfile = "";
 
   /**
@@ -49,7 +60,6 @@ Class Posts_Iterator_Helper {
     // If we're trying to use WP_CLI and it doesn't exist, bail silently to
     // avoid problems to a site's FE
     if ( PIH_METHOD == "WP_CLI" && !class_exists( 'WP_CLI' ) ) return;
-
 
     // Define default variables
 
@@ -66,17 +76,9 @@ Class Posts_Iterator_Helper {
         ID
       FROM $wpdb->posts
       WHERE 1 = 1
-      AND post_type = '".$this->post_type."'
     ";
-    // DEV ONLY
+    // FOR DEV ONLY
     $this->sql .= " LIMIT 1";
-
-    // Loop and execute as needed
-    if ( PIH_METHOD == "WP_CLI" ) {
-      WP_CLI::add_hook( 'after_wp_load', array( $this, 'do_callback' ) );
-    } else {
-      add_action( 'wp', array( $this, 'do_callback' ) );
-    }
   }
 
   /**
@@ -115,48 +117,66 @@ Class Posts_Iterator_Helper {
    * Default callback function. Will cause a post update and print out the
    * updated posts' ID
    */
-  public static function callback( $id ) {
-    // Get the post
-    $post = get_post( $id );
+  // TODO Use WordPress's POST instead of a foreach on the results maybe?
+  public static function callback( $post ) {
     // Trigger post update (same data)
     wp_update_post( $post );
-    // Clean cache entirely, since we don't need to keep any information about
-    // the post we're iterating in memory
-    wp_cache_flush();
     // Print updated ID
-    self::log( $id." updated" );
+    self::log( $post->ID." updated" );
   }
 
   /**
-   * Loop through each product and execute callback based on it. Then die.
+   * Loop through each post and execute callback based on it. Then die.
    */
   public function do_callback() {
-    if ( !isset( $this->ids ) ) {
-      $this->set_post_ids();
+    if ( !is_array( $this->posts ) ) {
+      self::log( "Posts: ", $this->posts );
+      WP_CLI::error( "No posts were initialized" );
     }
-    // Loop through the array of ids
-    foreach ( $this->ids as $id ) {
+    // Loop through the array of posts
+    foreach ( $this->posts as $post ) {
       // Do the callback based on this post's ID
-      self::callback( $id );
+      call_user_func_array( $this->callback, array( $post ) );
     }
     // Die
     exit;
   }
 
-  /**
-   * Returns an array of all IDs that we want to run the callback on
-   * @return array
-   */
-  public function set_post_ids() {
-    // Only run this function once, if we have ids set, bail
-    if ( isset( $this->ids ) ) return;
-    global $wpdb;
-    $this->ids = $wpdb->get_col( $this->sql );
+  private function parse_args() {
+    if ( !$this->args ) {
+      $this->callback = array( __CLASS__, 'callback' );
+    } else {
+      eval( "\$this->callback = function( $post ) {".$this->args."}" );
+    }
   }
 
-  // This is where we start our execution if called through WP_CLI
-  public function wp_cli_entry( $args = null ) {
-    // TODO: Parse arguments and such
+  private function parse_query() {
+    $keys = array_keys( $this->assoc_args );
+    $args = array();
+    foreach ($keys as $k) {
+      if ( strpos($k, 'query_') !== false ) {
+        eval( "\$val = ".$this->assoc_args[ $k ].";" );
+        $args[ str_replace( 'query_', '', $k ) ] = $val;
+      }
+    }
+    $args = wp_parse_args( $args, self::$default_args );
+
+    $this->query = new WP_Query( $args );
+    $this->posts = $this->query->posts;
+  }
+
+  /**
+   * This is where we start our execution if called through WP_CLI
+   *
+   * wp zg iterate posts [args] [--assoc_args=assoc_args]
+   */
+  public function wp_cli_entry( $args = false, $assoc_args = false ) {
+    $this->args = $args;
+    $this->assoc_args = $assoc_args;
+    $this->parse_args();
+    
+    $this->parse_query();
+
     $this->do_callback();
   }
 
@@ -167,36 +187,3 @@ if ( PIH_METHOD == "WP_CLI" && class_exists( 'WP_CLI' ) ) {
   $helper = Posts_Iterator_Helper::getInstance();
   WP_CLI::add_command( 'zg iterate-posts', array( $helper, 'wp_cli_entry' ) );
 }
-
-// Override default SQL
-$helper->sql = "
-  SELECT
-    ID
-  FROM $wpdb->posts
-  WHERE 1 = 1
-  AND post_type = 'post'
-  AND post_status IN ('ready-to-post')
-  ORDER BY ID ASC
-";
-
-
-// Example Commands:
-// 
-// wp zg iterate-posts
-// wp zg iterate-posts [post-type]
-// wp zg iterate-posts [post-type] [code]
-
-
-// // Get any existing copy of our transient data
-// if ( false === ( $iterator_settings = get_transient( 'iterator_settings' ) ) ) {
-//   // It wasn't there, so regenerate the data and save the transient
-//   $iterator_settings = array();
-//   $iterator_settings['total'] = $helper->get_total_ids();
-//   set_transient( 'iterator_settings', $iterator_settings, 1 * DAY_IN_SECONDS );
-// }
-
-// $total = 
-// $amount =
-// $offest =
-
-

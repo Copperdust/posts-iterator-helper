@@ -16,7 +16,7 @@
 
 // Example Commands:
 // 
-// wp zg iterate-posts --query_posts_per_page=10 --query_paged=2 --query_post_status="array('ready-to-post')"
+// wp iterate-posts --query_posts_per_page=10 --query_paged=2 --query_post_status="array('ready-to-post')"
 
 // If this file is called directly, abort.
 if ( ! defined( 'WPINC' ) ) {

@@ -3,10 +3,10 @@
 Evals custom PHP code to every matching post from a WP_Query
 
 ## OPTIONS
-[<code>]
+`<code>`
 Function *BODY* to exectute. Variable $post will be available. By default it will simply trigger update of the post.
 
-[--<field>=<value>]
+`--<field>=<value>`
 Allows passing of arguments to WP_Query, prepend every argument with --query_
 Example: --query_posts_per_page=9 --query_paged=3
 
@@ -28,6 +28,5 @@ Example: --query_posts_per_page=9 --query_paged=3
    ```bash
    cat > posts-iterator-helper.php
    <?php
-   include_once( 'posts-iterator-helper/posts-iterator-helper' );`
-   
+   include_once( WPMU_PLUGIN_DIR.'/posts-iterator-helper/posts-iterator-helper.php' );
    ```
